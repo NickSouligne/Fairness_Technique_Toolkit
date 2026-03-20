@@ -1,0 +1,204 @@
+# runner.py
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
+
+import pandas as pd
+
+from .core import RunResult, split_data
+
+from .techniques_pre import run_reweighting, run_smote_or_ros, run_local_massaging
+from .techniques_in import (
+    run_baseline,
+    run_compositional_models,
+    run_group_balanced_ensemble,
+    run_multicalibration,
+    run_reductions_meta,
+    run_prejudice_remover,
+)
+from .techniques_post import (
+    run_group_youden_postproc,
+    run_multiaccuracy_boost,
+    run_reject_option_shift,
+    run_input_repair,
+    run_reject_option_kamiran,
+)
+from .techniques_combined import run_combined_pipeline
+
+
+# These keys match the GUI checkboxes exactly (so you can reuse saved configs).
+ALL_TECHNIQUES: Sequence[str] = (
+    "Pre:Reweight (y,a)",
+    "Pre:SMOTE / Oversample",
+    "Pre:Local Massaging",
+    "In:Compositional per-group",
+    "In:Ensemble (K=5)",
+    "In:Multicalibration (isotonic)",
+    "In:Reductions (EO)",
+    "In:Fairness Regularization (Prejudice Remover)",
+    "Post:Youden per group",
+    "Post:Multiaccuracy Boost",
+    "Post:Reject-Option Shift",
+    "Post:Input Repair",
+    "Post:Reject-Option Kamiran",
+)
+
+
+@dataclass(frozen=True)
+class PipelineConfig:
+    """
+    Everything the GUI used to collect is now passed as a config object.
+
+    - df_or_path: a DataFrame OR a CSV path
+    - target: label column name
+    - protected: list of protected attribute column name(s)
+    - features: list of feature column names (should NOT include target/protected)
+    - model_name: must be compatible with build_estimator() inside core.py
+    - model_params: kwargs passed into the estimator builder
+    - techniques: list of technique keys (see ALL_TECHNIQUES)
+    - run_baseline: whether to run the pooled baseline model
+    - run_combined: whether to run the combined pipeline
+    - split kwargs: forwarded to split_data
+    """
+    df_or_path: Union[pd.DataFrame, str]
+    target: str
+    protected: Sequence[str]
+    features: Sequence[str]
+    model_name: str
+    model_params: Dict[str, Any] = field(default_factory=dict)
+
+    techniques: Sequence[str] = field(default_factory=list)
+    run_baseline: bool = True
+    run_combined: bool = False
+
+    test_size: float = 0.25
+    val_size: float = 0.2
+    random_state: int = 42
+
+
+def _load_df(df_or_path: Union[pd.DataFrame, str]) -> pd.DataFrame:
+    if isinstance(df_or_path, pd.DataFrame):
+        return df_or_path.copy()
+    if isinstance(df_or_path, str):
+        return pd.read_csv(df_or_path)
+    raise TypeError("df_or_path must be a pandas DataFrame or a CSV file path (str).")
+
+
+def _normalize_features(
+    *,
+    df: pd.DataFrame,
+    target: str,
+    protected: Sequence[str],
+    features: Sequence[str],
+) -> List[str]:
+    # Match GUI behavior: exclude target and protected from features. :contentReference[oaicite:3]{index=3}
+    f = [c for c in features if c != target and c not in protected]
+    if len(f) < 1:
+        raise ValueError("features must include at least one column not in target/protected.")
+    missing = [c for c in [*f, *protected, target] if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns in df: {missing}")
+    return f
+
+
+def _selected_dict(techniques: Sequence[str]) -> Dict[str, bool]:
+    s = set(techniques)
+    return {k: (k in s) for k in ALL_TECHNIQUES}
+
+
+def run_pipeline(cfg: PipelineConfig) -> List[RunResult]:
+    """
+    Single entrypoint that replaces the GUI run button.
+
+    Returns a list of RunResult objects in the same style/order the GUI produced.
+    """
+    df = _load_df(cfg.df_or_path)
+
+    protected = list(cfg.protected)
+    features = _normalize_features(df=df, target=cfg.target, protected=protected, features=cfg.features)
+
+    # Prepare data & splits (same call pattern as GUI). :contentReference[oaicite:4]{index=4}
+    X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te = split_data(
+        df[[*features, *protected, cfg.target]],
+        cfg.target,
+        protected,
+        features,
+        test_size=cfg.test_size,
+        val_size=cfg.val_size,
+        random_state=cfg.random_state,
+    )
+
+    # Keep full train (GUI does train+val concat). :contentReference[oaicite:5]{index=5}
+    all_df_train = pd.concat([X_tr, X_va], axis=0)
+
+    model_name = cfg.model_name
+    params = dict(cfg.model_params)
+
+    results: List[RunResult] = []
+
+    # Baseline
+    if cfg.run_baseline:
+        results.append(
+            run_baseline(
+                model_name, params,
+                X_tr, X_va, X_te, y_tr, y_va, y_te,
+                A_tr, A_va, A_te,
+                protected, all_df_train
+            )
+        )
+
+    # Technique dispatch mirrors GUI exactly. :contentReference[oaicite:6]{index=6} :contentReference[oaicite:7]{index=7}
+    selected = _selected_dict(cfg.techniques)
+
+    # Pre
+    if selected["Pre:Reweight (y,a)"]:
+        results.append(run_reweighting(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["Pre:SMOTE / Oversample"]:
+        results.append(run_smote_or_ros(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["Pre:Local Massaging"]:
+        results.append(run_local_massaging(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+
+    # In
+    if selected["In:Compositional per-group"]:
+        results.append(run_compositional_models(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["In:Ensemble (K=5)"]:
+        results.append(run_group_balanced_ensemble(model_name, params, 5, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["In:Multicalibration (isotonic)"]:
+        results.append(run_multicalibration(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["In:Reductions (EO)"]:
+        results.append(run_reductions_meta(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train, constraint="EO"))
+    if selected["In:Fairness Regularization (Prejudice Remover)"]:
+        results.append(run_prejudice_remover(
+            model_name, params,
+            X_tr, X_va, X_te, y_tr, y_va, y_te,
+            A_tr, A_va, A_te,
+            protected, all_df_train,
+            eta=25.0,
+        ))
+
+    # Post
+    if selected["Post:Youden per group"]:
+        results.append(run_group_youden_postproc(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["Post:Multiaccuracy Boost"]:
+        results.append(run_multiaccuracy_boost(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["Post:Reject-Option Shift"]:
+        results.append(run_reject_option_shift(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["Post:Input Repair"]:
+        results.append(run_input_repair(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train))
+    if selected["Post:Reject-Option Kamiran"]:
+        results.append(run_reject_option_kamiran(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te, protected, all_df_train, fairness_objective="eod", 
+                                                 fairness_bound=0.05, max_acc_drop=0.02))
+
+    # Combined
+    if cfg.run_combined:
+        combined_rr = run_combined_pipeline(
+            model_name, params,
+            X_tr, X_va, X_te, y_tr, y_va, y_te,
+            A_tr, A_va, A_te,
+            protected, all_df_train,
+            selected=selected,
+        )
+        results.append(combined_rr)
+
+    return results
