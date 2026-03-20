@@ -71,7 +71,7 @@ PARAM_SPECS["SVM"] = [
     _p("probability", bool, False, True, "Enable probability."),
 ]
 
-from deps import XGB_OK, LGBM_OK
+from .deps import XGB_OK, LGBM_OK
 
 if XGB_OK:
     PARAM_SPECS["XGBoost"] = [
