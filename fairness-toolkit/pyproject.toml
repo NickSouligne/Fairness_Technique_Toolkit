@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fairness-tool"
+version = "0.1.0"
+description = "Toolkit for comparing pre-, in-, and post-processing fairness interventions in ML pipelines."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  {name = "Your Name"}
+]
+dependencies = [
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "matplotlib",
+  "pillow"
+]
+
+[project.optional-dependencies]
+extra = [
+  "imbalanced-learn",
+  "fairlearn",
+  "xgboost",
+  "lightgbm",
+  "aif360"
+]
+
+[project.scripts]
+fairness-tool = "fairness_tool.cli:main"
+fairness-tool-gui = "fairness_tool.main:main"
+
+[tool.setuptools]
+packages = ["fairness_tool"]
