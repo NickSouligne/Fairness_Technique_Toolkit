@@ -328,7 +328,7 @@ def run_baseline(model_name, params,
       5. Evaluate via evaluate_run with name "Baseline".
 
     """
-    from deps import Pipeline
+    from .deps import Pipeline
     #Create pipeline
     pipe = Pipeline(steps=[
         ("prep", build_preprocessor(pd.concat([X_tr, X_va]), protected_cols)),
