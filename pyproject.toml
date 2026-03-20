@@ -29,8 +29,8 @@ extra = [
 ]
 
 [project.scripts]
-fairness-tool = "fairness_tool.cli:main"
-fairness-tool-gui = "fairness_tool.main:main"
+fairness-tool = "fairness-tool.cli:main"
+fairness-tool-gui = "fairness-tool.main:main"
 
 [tool.setuptools]
-packages = ["fairness_tool"]
+packages = ["fairness-tool"]
