@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 
-from .deps import IMBLEARN_OK, SMOTE, RandomOverSampler
+from .deps import IMBLEARN_OK, RandomOverSampler
 from .core import RunResult, build_estimator, build_preprocessor, evaluate_run
 from .utils import to_proba, fit_with_optional_sample_weight, youden_threshold
 
