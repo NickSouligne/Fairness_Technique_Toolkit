@@ -9,6 +9,24 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run fairness pipeline from command line"
     )
+    parser.add_argument(
+        "--min-group-size",
+        type=int,
+        default=20,
+        help="Minimum acceptable intersectional group size. Default: 20."
+    )
+
+    parser.add_argument(
+        "--allow-incomplete-outcome-coverage",
+        action="store_true",
+        help="Allow groups that do not contain both outcome classes."
+    )
+
+    parser.add_argument(
+        "--no-group-filter",
+        action="store_true",
+        help="Disable filtering of small or incomplete intersectional groups."
+    )
 
     parser.add_argument(
         "--data",
@@ -87,8 +105,10 @@ def main():
         techniques=args.techniques,
         run_baseline=not args.no_baseline,
         run_combined=not args.no_combined,
+        min_group_size=args.min_group_size,
+        require_outcome_coverage=not args.allow_incomplete_outcome_coverage,
+        filter_small_groups=not args.no_group_filter,
     )
-
     results = run_pipeline(cfg)
 
     # Print results

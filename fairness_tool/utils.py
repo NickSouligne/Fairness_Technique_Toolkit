@@ -11,6 +11,74 @@ from .deps import (
 )
 
 
+def filter_intersectional_groups(
+    df: pd.DataFrame,
+    protected_cols: List[str],
+    target_col: str,
+    min_group_size: int = 20,
+    require_outcome_coverage: bool = True,
+):
+    """
+    Remove intersectional groups that are too small or do not contain both
+    outcome classes.
+
+    A group is retained if:
+      1. total group size >= min_group_size
+      2. if require_outcome_coverage=True, the group has at least one 0 and one 1
+    """
+
+    df = df.copy()
+    df["_intersectional_group"] = group_key(df, protected_cols)
+
+    group_summary = (
+        df.groupby("_intersectional_group")[target_col]
+          .agg(
+              n="size",
+              n_positive=lambda x: int((x == 1).sum()),
+              n_negative=lambda x: int((x == 0).sum()),
+              n_outcome_classes=lambda x: x.nunique()
+          )
+          .reset_index()
+    )
+
+    group_summary["too_small"] = group_summary["n"] < min_group_size
+
+    if require_outcome_coverage:
+        group_summary["incomplete_outcome_coverage"] = (
+            (group_summary["n_positive"] == 0) |
+            (group_summary["n_negative"] == 0)
+        )
+    else:
+        group_summary["incomplete_outcome_coverage"] = False
+
+    group_summary["removed"] = (
+        group_summary["too_small"] |
+        group_summary["incomplete_outcome_coverage"]
+    )
+
+    keep_groups = group_summary.loc[
+        ~group_summary["removed"],
+        "_intersectional_group"
+    ]
+
+    filtered_df = (
+        df[df["_intersectional_group"].isin(keep_groups)]
+        .drop(columns=["_intersectional_group"])
+        .copy()
+    )
+
+    removed_groups = group_summary[group_summary["removed"]].copy()
+
+    message = (
+        f"Intersectional group filter applied: "
+        f"removed {len(removed_groups)} groups and "
+        f"{len(df) - len(filtered_df)} rows. "
+        f"Minimum group size = {min_group_size}. "
+        f"Require both outcome classes = {require_outcome_coverage}."
+    )
+
+    return filtered_df, removed_groups, message
+
 def estimator_accepts_sample_weight(estimator) -> bool:
     """
     Check whether an estimator's .fit method accepts a 'sample_weight' argument.

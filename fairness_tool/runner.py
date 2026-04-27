@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
+from .utils import filter_intersectional_groups
 
 import pandas as pd
 
@@ -71,6 +72,9 @@ class PipelineConfig:
     techniques: Sequence[str] = field(default_factory=list)
     run_baseline: bool = True
     run_combined: bool = False
+    min_group_size: int = 20
+    require_outcome_coverage: bool = True
+    filter_small_groups: bool = True
 
     test_size: float = 0.25
     val_size: float = 0.2
@@ -117,6 +121,29 @@ def run_pipeline(cfg: PipelineConfig) -> List[RunResult]:
 
     protected = list(cfg.protected)
     features = _normalize_features(df=df, target=cfg.target, protected=protected, features=cfg.features)
+    filter_note = ""
+
+    if cfg.filter_small_groups:
+        df, removed_groups, filter_note = filter_intersectional_groups(
+            df=df,
+            protected_cols=protected,
+            target_col=cfg.target,
+            min_group_size=cfg.min_group_size,
+            require_outcome_coverage=cfg.require_outcome_coverage,
+        )
+
+        print("\n[FairSelect group filtering]")
+        print(filter_note)
+
+        if len(removed_groups) > 0:
+            print("\nRemoved intersectional groups:")
+            print(removed_groups.to_string(index=False))
+
+        if df.empty:
+            raise ValueError(
+                "All rows were removed by the intersectional group filter. "
+                "Lower min_group_size or disable require_outcome_coverage."
+            )
 
     # Prepare data & splits (same call pattern as GUI). :contentReference[oaicite:4]{index=4}
     X_tr, X_va, X_te, y_tr, y_va, y_te, A_tr, A_va, A_te = split_data(
@@ -200,5 +227,9 @@ def run_pipeline(cfg: PipelineConfig) -> List[RunResult]:
             selected=selected,
         )
         results.append(combined_rr)
+    
+    for r in results:
+        if filter_note:
+            r.notes = (r.notes + "\n" + filter_note).strip()
 
     return results
