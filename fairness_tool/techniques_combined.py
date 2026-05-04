@@ -126,6 +126,7 @@ def run_combined_pipeline(model_name, params,
 
     trained_est = None #Contains the trained estimator if applicable
     P_val = None  #validation probabilities (needed by many post steps)
+    ensemble_estimators = None
 
     #Helper fn: Given a trained estimator, score val and test sets
     def _score_val_and_test(est_like):
@@ -204,6 +205,7 @@ def run_combined_pipeline(model_name, params,
         elif choice == "In:Ensemble (K=5)":
             K = 5 #Number of bootstrap samples (TODO: Allow user to specific K)
             preds_test, preds_val = [], []
+            ensemble_estimators = []  #Store individual estimators if we want to analyze them later (TODO: Integrate into RunResult)
             #Transform datasets with standard preprocessor
             Xte_t = prep.transform(Xte)
             Xva_t = prep.transform(Xva)
@@ -217,6 +219,8 @@ def run_combined_pipeline(model_name, params,
                 #Score test and validation probabilities for this ensemble
                 preds_test.append(to_proba(est, Xte_t))
                 preds_val.append(to_proba(est, Xva_t))
+                #Store the individual estimator
+                ensemble_estimators.append(est)
             #Aggregate predictions by averaging across K models
             p_test = np.mean(np.vstack(preds_test), axis=0)
             P_val  = np.mean(np.vstack(preds_val),  axis=0)
@@ -263,7 +267,19 @@ def run_combined_pipeline(model_name, params,
         #If we have a single trained estimator, rescore on repaired features
         if trained_est is not None: 
             p_test = to_proba(trained_est, prep.transform(X_rep))
-        # else (ensemble): keep p_test as-is (cannot rescore without base estimators) (TODO: Need to store multiple estimators)
+        elif ensemble_estimators is not None and len(ensemble_estimators) > 0:
+            repaired_preds = [
+                to_proba(est, X_rep_t)
+                for est in ensemble_estimators
+            ]
+            p_test = np.mean(np.vstack(repaired_preds), axis=0)
+        else:
+            # No available estimator object to rescore repaired inputs.
+            # Keep p_test unchanged, but make this explicit.
+            print(
+                "[Input Repair] No trained estimator or ensemble estimators available; "
+                "keeping existing p_test unchanged."
+            )
 
     #Multiaccuracy Boost (residual model on validation) -- Based on Kim 2018
     #Fits a residual model on validation data to boost probabilities using group wise signals, then applies to test data

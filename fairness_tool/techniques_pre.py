@@ -189,9 +189,9 @@ def run_smote_or_ros(model_name, params, X_tr, X_va, X_te, y_tr, y_va, y_te, A_t
     #Use IMBLEARN if available
     if IMBLEARN_OK:
         try:
-            sampler = SMOTE(random_state=42)
+            sampler = IMBLEARN_OK.SMOTE(random_state=42)
         except Exception:
-            sampler = RandomOverSampler()
+            sampler = IMBLEARN_OK.RandomOverSampler()
     else:
         #simple numpy oversample
         print("IMBLEARN not available, using simple oversampling fallback.")
